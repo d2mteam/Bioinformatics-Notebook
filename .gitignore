@@ -1,0 +1,64 @@
+# Raw and downloaded data
+Data/
+data/
+
+# Generated datasets and intermediate artifacts
+processed/
+
+# Trained models and checkpoints
+models/
+*.pt
+*.pth
+*.ckpt
+*.joblib
+*.pkl
+
+# Large array/table formats
+*.npy
+*.npz
+*.parquet
+*.h5
+*.hdf5
+*.feather
+*.vcf
+*.vcf.gz
+*.fasta
+*.fa
+*.fna
+*.fai
+*.fastq
+*.fq
+*.fastq.gz
+*.fq.gz
+*.bam
+*.bai
+*.sam
+*.cram
+*.bed.gz
+*.tsv.gz
+*.csv.gz
+
+# Notebook/runtime cache
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Jupyter and local IDE state
+.jupyter/
+.vscode/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
