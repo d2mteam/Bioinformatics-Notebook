@@ -7,12 +7,12 @@ Dự án này đang xây một pipeline machine learning cho bài toán phân lo
 - `1`: `Pathogenic` / `Likely pathogenic`
 - `0`: `Benign` / `Likely benign`
 
-Nguồn dữ liệu chính là `Data/variant_summary.txt` từ ClinVar và FASTA tham chiếu GRCh38 trong `Data/ncbi_dataset/`. Pipeline hiện có 2 hướng mô hình:
+Nguồn dữ liệu chính là `Data/variant_summary.txt` từ ClinVar snapshot đầu tháng 5/2026 và FASTA tham chiếu GRCh38 trong `Data/ncbi_dataset/`. Pipeline hiện có 2 hướng mô hình:
 
-- Sequence models: dùng DNA context 201 bp quanh vị trí đột biến, encode thành tensor cho CNN/Transformer.
+- Sequence models: dùng DNA context quanh vị trí đột biến, encode thành tensor cho CNN/Transformer. Mốc tốt nhất hiện tại là 601 bp với dilated CNN + 1D window attention.
 - Tabular models: dùng metadata ClinVar và annotation ngoài tùy chọn cho XGBoost.
 
-Artifact hiện tại cho thấy pipeline đã chạy xong preprocessing, đã train nhiều model baseline, đã audit leakage của random split, và model tốt nhất hiện tại là CNN `gene_group` có positional encoding.
+Artifact hiện tại cho thấy pipeline đã chạy xong preprocessing, đã train nhiều model baseline, đã audit leakage của random split, và model tốt nhất hiện tại là CNN `gene_group` 601 bp dạng dilated + window attention, có positional encoding, reverse-complement augmentation/TTA và hard-negative mining.
 
 ## Dữ liệu và label hiện tại
 
@@ -22,6 +22,18 @@ Pipeline sequence sau khi filter tạo ra dataset chính:
 - `processed/X_alt_201.npy`: shape `(460488, 201, 4)`, one-hot sequence đột biến.
 - `processed/X_ref_alt_marker_201.npy`: shape `(460488, 201, 9)`, gồm `ref_seq` 4 kênh, `alt_seq` 4 kênh, mutation marker 1 kênh.
 - `processed/y.npy`: shape `(460488,)`.
+
+Thử nghiệm context dài 1001 bp tạo thêm:
+
+- `processed/clinvar_training_metadata_1001.parquet`: `460,414` biến thể.
+- `processed/X_ref_alt_marker_1001.npy`: shape `(460414, 1001, 9)`, khoảng `3.9 GB`.
+- `processed/y_1001.npy`: shape `(460414,)`.
+
+Thử nghiệm context 601 bp tạo thêm:
+
+- `processed/clinvar_training_metadata_601.parquet`: `460,443` biến thể.
+- `processed/X_ref_alt_marker_601.npy`: shape `(460443, 601, 9)`, khoảng `2.4 GB`.
+- `processed/y_601.npy`: shape `(460443,)`.
 
 Phân bố label trong dataset sequence:
 
@@ -118,7 +130,7 @@ Output chính:
 
 Mở rộng CNN `gene_group` bằng sinusoidal positional encoding.
 
-Input từ `(201, 9)` được concat thêm 8 kênh positional encoding thành `(201, 17)`. Đây là model sequence tốt nhất hiện tại theo artifact đã lưu.
+Input từ `(201, 9)` được concat thêm 8 kênh positional encoding thành `(201, 17)`. Đây là mốc cải tiến quan trọng ban đầu, nhưng không còn là model sequence tốt nhất hiện tại sau các thử nghiệm 601 bp/dilated/window attention.
 
 Output chính:
 
@@ -126,6 +138,65 @@ Output chính:
 - `processed/cnn_gene_group_positional_encoding_test_predictions_pytorch.parquet`
 - `processed/cnn_gene_group_positional_encoding_training_history_pytorch.parquet`
 - `processed/cnn_gene_group_positional_encoding_threshold_table_pytorch.parquet`
+
+### `scripts/build_cnn_dataset_1001.py` và `scripts/train_cnn_gene_group_positional_1001.py`
+
+Script build context dài quanh SNV, mặc định 1001 bp nhưng có thể dùng `--flank` để tạo 601/2001/4001/8001 nếu đủ storage. Pipeline vẫn dùng input ref+alt+marker 9 kênh và concat thêm positional encoding khi train. Script train hiện hỗ trợ:
+
+- `baseline`: CNN nông giống thử nghiệm ban đầu.
+- `dilated`: CNN 1D dùng dilation `[1, 2, 4, 8, 16, 32, 64]`, giữ resolution 1001 bp và dùng center/global pooling.
+- `dilated_residual`: biến thể có residual/skip connection.
+- `dilated_window_attention`: dilated CNN cộng thêm 1D local window attention trước pooling.
+
+Script train cũng hỗ trợ:
+
+- `--length`: chọn dataset 601/1001 hoặc length đã build.
+- `--positional-encoding none|sinusoidal|relative`.
+- `--rc-augment`: random reverse-complement khi train.
+- `--rc-tta`: average prediction giữa original và reverse-complement khi eval/test.
+- `--random-state`: đổi gene-group split; output seed khác 42 được gắn hậu tố `_seedXX` để tránh ghi đè artifact chính.
+
+Kết quả hiện tại cho thấy chỉ tăng window lên 1001 bp bằng CNN baseline chưa cải thiện. Cải tiến mạnh nhất đến từ 601 bp + dilated CNN + RC augment/TTA, sau đó 1D window attention tiếp tục tăng PR-AUC/F1.
+
+Output chính:
+
+- `processed/clinvar_context_601.parquet`
+- `processed/clinvar_training_metadata_601.parquet`
+- `processed/X_ref_alt_marker_601.npy`
+- `processed/y_601.npy`
+- `processed/clinvar_context_1001.parquet`
+- `processed/clinvar_training_metadata_1001.parquet`
+- `processed/X_ref_alt_marker_1001.npy`
+- `processed/y_1001.npy`
+- `models/clinvar_cnn_gene_group_positional_encoding_601_dilated_rcaug_rctta_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_601_dilated_window_attention_rcaug_rctta_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_1001_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_1001_dilated_pytorch.pt`
+- `processed/cnn_gene_group_positional_encoding_601_dilated_window_attention_rcaug_rctta_*`
+- `processed/cnn_gene_group_positional_encoding_1001_*`
+
+### `notebooks/08_train_best_cnn_601_window_attention_rcaug_rctta.ipynb`
+
+Notebook mới đóng gói best model hiện tại và cách dùng lại artifact:
+
+- Cấu hình best: `601 bp + dilated_window_attention + sinusoidal positional encoding + RC augment + RC TTA`.
+- Mặc định `RUN_TRAIN = False` để không vô tình ghi đè artifact.
+- Có cell gọi lại script train đúng tham số khi cần train lại.
+- Có cell đọc metrics/history, load checkpoint và predict theo dataset index.
+
+Notebook này không chỉnh sửa notebook 01.
+
+### `scripts/build_refseq_context_parquet.py` và `scripts/build_ref_sequence_parquet.py`
+
+Các script thử nghiệm lưu context dạng `ref_seq` string Parquet thay vì dense one-hot `.npy`.
+
+Mục tiêu:
+
+- Giảm storage khi muốn lưu context dài 2001/4001/8001 bp.
+- Đẩy dataset lên Kaggle nhẹ hơn.
+- Encode one-hot on-the-fly trong `Dataset` khi train CNN.
+
+Ước tính với khoảng 460k variants, `ref_seq` 8001 bp dạng Parquet `zstd` có thể ở mức khoảng `0.8-1.2 GB`, nhỏ hơn nhiều so với dense one-hot 9-channel 8001 bp khoảng `33 GB`.
 
 ### `notebooks/03_cnn_interpretability.ipynb`
 
@@ -219,6 +290,13 @@ Các số dưới đây được đọc lại từ prediction artifact trong `pr
 | CNN ref+alt+marker | gene_group | 9-channel | 0.8478 | 0.5224 | 0.7932 | 0.3435 | 0.7351 | 0.4682 |
 | CNN gene_group balanced | gene_group | 9-channel | 0.8397 | 0.5114 | 0.8594 | 0.4464 | 0.5627 | 0.4979 |
 | CNN + positional encoding | gene_group | 17-channel | **0.8806** | **0.5722** | **0.8835** | **0.5272** | 0.5811 | **0.5529** |
+| CNN + positional encoding 1001 bp | gene_group | 17-channel, 1001 bp | 0.8584 | 0.5702 | 0.7834 | 0.3775 | **0.7691** | 0.5064 |
+| Dilated CNN + positional encoding 601 bp | gene_group | 17-channel, 601 bp | 0.9327 | 0.7745 | 0.9081 | 0.6693 | 0.7191 | 0.6933 |
+| Dilated CNN + positional encoding 1001 bp | gene_group | 17-channel, 1001 bp | **0.9317** | **0.7732** | **0.9039** | 0.6491 | 0.7287 | **0.6866** |
+| Dilated CNN + positional encoding + RC augment/TTA 601 bp | gene_group | 17-channel, 601 bp | 0.9557 | 0.8431 | 0.9154 | 0.6693 | 0.8188 | 0.7366 |
+| Dilated residual CNN + RC augment/TTA 601 bp | gene_group | 17-channel, 601 bp | 0.9493 | 0.8224 | 0.9215 | 0.7197 | 0.7479 | 0.7335 |
+| Dilated CNN + relative PE + RC augment/TTA 601 bp | gene_group | 17-channel, 601 bp | 0.9533 | 0.8381 | 0.9159 | 0.6733 | 0.8121 | 0.7362 |
+| Dilated CNN + window attention + RC augment/TTA 601 bp | gene_group | 17-channel, 601 bp | **0.9589** | **0.8507** | 0.9148 | 0.6605 | **0.8440** | **0.7410** |
 | XGBoost tabular baseline | tabular split | ClinVar metadata | 0.7265 | 0.3932 | 0.8929 | 0.9326 | 0.1002 | 0.1809 |
 | XGBoost Optuna tuned | gene_group | ClinVar metadata + optional annotations | 0.6095 | 0.1700 | 0.8736 | 0.1538 | 0.0045 | 0.0087 |
 
@@ -226,6 +304,14 @@ Threshold analysis đáng chú ý:
 
 - CNN + positional encoding best F1: threshold `0.4685`, precision `0.5020`, recall `0.6182`, F1 `0.5541`.
 - CNN + positional encoding best F2: threshold `0.2739`, precision `0.3711`, recall `0.7867`, F2 `0.6428`.
+- CNN + positional encoding 1001 bp best F1: threshold `0.5857`, precision `0.4860`, recall `0.6152`, F1 `0.5430`.
+- CNN + positional encoding 1001 bp best F2: threshold `0.4745`, precision `0.3480`, recall `0.8072`, F2 `0.6386`.
+- Dilated CNN 1001 bp best validation-F1 threshold `0.5797`: test precision `0.6867`, recall `0.6903`, F1 `0.6885`.
+- Dilated CNN 1001 bp best validation-F2 threshold `0.2635`: test precision `0.5316`, recall `0.8290`, F1 `0.6478`.
+- Dilated CNN 601 bp + RC augment/TTA best validation-F1 threshold `0.6226`: test precision `0.7629`, recall `0.7346`, F1 `0.7485`.
+- Dilated CNN 601 bp + RC augment/TTA best validation-F2 threshold `0.4373`: test precision `0.6228`, recall `0.8564`, F1 `0.7212`.
+- Dilated CNN + window attention 601 bp + RC augment/TTA best validation-F1 threshold `0.6954`: test precision `0.7967`, recall `0.7162`, F1 `0.7543`.
+- Dilated CNN + window attention 601 bp + RC augment/TTA best validation-F2 threshold `0.4449`: test precision `0.6180`, recall `0.8703`, F1 `0.7228`.
 - XGBoost tabular baseline best F1: threshold `0.1450`, precision `0.4927`, recall `0.3152`, F1 `0.3844`.
 
 ## Artifact chính
@@ -238,6 +324,13 @@ Threshold analysis đáng chú ý:
 - `models/clinvar_ref_alt_marker_cnn_gene_group_pytorch.pt`
 - `models/clinvar_ref_alt_marker_cnn_gene_group_balanced_pytorch.pt`
 - `models/clinvar_cnn_gene_group_positional_encoding_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_601_dilated_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_601_dilated_rcaug_rctta_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_601_dilated_residual_rcaug_rctta_pytorch.pt`
+- `models/clinvar_cnn_gene_group_relative_positional_encoding_601_dilated_rcaug_rctta_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_601_dilated_window_attention_rcaug_rctta_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_1001_pytorch.pt`
+- `models/clinvar_cnn_gene_group_positional_encoding_1001_dilated_pytorch.pt`
 - `models/clinvar_xgboost_tabular_baseline.joblib`
 - `models/clinvar_xgboost_optuna_tuned.joblib`
 
@@ -251,12 +344,18 @@ Threshold analysis đáng chú ý:
 - `processed/clinvar_tabular_cnn_aligned.parquet`
 - `processed/X_alt_201.npy`
 - `processed/X_ref_alt_marker_201.npy`
+- `processed/X_ref_alt_marker_601.npy`
+- `processed/X_ref_alt_marker_1001.npy`
 - `processed/y.npy`
+- `processed/y_601.npy`
+- `processed/y_1001.npy`
 
 ### Predictions and reports
 
 - `processed/cnn_demo_*`
 - `processed/cnn_gene_group_*`
+- `processed/cnn_gene_group_positional_encoding_601_*`
+- `processed/cnn_gene_group_positional_encoding_1001_*`
 - `processed/transformer_small_*`
 - `processed/xgboost_tabular_baseline_*`
 - `processed/xgboost_optuna_tuned_*`
@@ -295,6 +394,36 @@ Thứ tự chạy lại gợi ý:
    - `notebooks/02_3_cnn_gene_group_split.ipynb`
    - `notebooks/02_4_cnn_positional_encoding.ipynb`
    - `notebooks/03_cnn_interpretability.ipynb`
+   - Hoặc chạy thử context 1001 bp bằng script:
+     ```bash
+     python scripts/build_cnn_dataset_1001.py
+     python scripts/train_cnn_gene_group_positional_1001.py --batch-size 256
+     python scripts/train_cnn_gene_group_positional_1001.py --architecture dilated --batch-size 256
+     ```
+   - Chạy lại best model hiện tại:
+     ```bash
+     python scripts/train_cnn_gene_group_positional_1001.py \
+       --length 601 \
+       --architecture dilated_window_attention \
+       --positional-encoding sinusoidal \
+       --positional-dim 8 \
+       --rc-augment \
+       --rc-tta \
+       --batch-size 256
+     ```
+   - Chạy multi-seed để kiểm tra overfit/split sensitivity:
+     ```bash
+     python scripts/train_cnn_gene_group_positional_1001.py \
+       --length 601 \
+       --architecture dilated_window_attention \
+       --positional-encoding sinusoidal \
+       --positional-dim 8 \
+       --rc-augment \
+       --rc-tta \
+       --batch-size 256 \
+       --random-state 43
+     ```
+     Với `random_state != 42`, output sẽ có hậu tố `_seed43`, `_seed44`, ... để không ghi đè artifact seed 42.
 3. Tabular/annotation:
    - `notebooks/07_build_clinvar_tabular_dataset.ipynb`
    - `notebooks/05_vep_consequence_annotation.ipynb` nếu cần VEP và Docker/cache đã sẵn sàng
@@ -306,6 +435,9 @@ Thứ tự chạy lại gợi ý:
 
 - Nhiều notebook đang hard-code `PROJECT_DIR = Path("/mnt/MyData/Bioinformatics/Project")`. Nếu move project, cần sửa path hoặc refactor sang path tương đối.
 - Random row split cho kết quả dễ optimistic vì gene/genomic neighborhood overlap cao. Nên ưu tiên báo cáo kết quả `gene_group`.
+- Context dài tốn storage/compute hơn đáng kể nếu lưu dense one-hot `.npy`. Nên ưu tiên lưu `ref_seq` string Parquet nếu muốn 2001/4001/8001 bp và encode one-hot on-the-fly.
+- Window attention hiện là best mới trên seed 42, nhưng runtime tăng khoảng `15.9 -> 24.5` phút. Cần chạy thêm seed 43/44 hoặc holdout độc lập trước khi xem là kết luận chắc.
+- Do đã thử nhiều architecture trên cùng project, có nguy cơ overfit ở cấp experiment/benchmark. Nên báo cáo mean/std multi-seed và nếu có thể làm temporal/external validation.
 - External annotation chưa thật sự đầy đủ: `variant_annotations.parquet` hiện có `consequence = unknown` và các cột gnomAD/CADD/SpliceAI đang null.
 - Bài toán đang là binary classification đã loại `Uncertain significance`, `Conflicting interpretations`, `not provided` và các nhãn mơ hồ khác.
 - Đây là project ML nghiên cứu/thử nghiệm, chưa phải pipeline clinical-grade.
