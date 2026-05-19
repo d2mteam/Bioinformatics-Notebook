@@ -66,6 +66,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hard-negative-lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument(
+        "--imbalance-strategy",
+        choices=[
+            "none",
+            "weighted_sampler",
+            "pos_weight",
+            "legacy_sqrt_sampler_pos_weight",
+        ],
+        default="weighted_sampler",
+        help=(
+            "How to handle class imbalance. Use exactly one mechanism by default: "
+            "weighted_sampler uses inverse-frequency sampling with unweighted BCE; "
+            "pos_weight uses natural sampling with BCE pos_weight=n_negative/n_positive; "
+            "legacy_sqrt_sampler_pos_weight reproduces the older sampler+sqrt(pos_weight) behavior."
+        ),
+    )
+    parser.add_argument(
         "--split-mode",
         choices=["gene_group", "purged_gene_group", "chromosome", "genome_block"],
         default="gene_group",
@@ -840,16 +856,35 @@ def make_model(architecture: str, in_channels: int) -> nn.Module:
     raise ValueError(f"Unknown architecture: {architecture}")
 
 
-def make_weighted_sampler(indices: np.ndarray, y: np.ndarray) -> WeightedRandomSampler:
+def make_weighted_sampler(
+    indices: np.ndarray, y: np.ndarray, imbalance_strategy: str
+) -> WeightedRandomSampler | None:
+    if imbalance_strategy not in {"weighted_sampler", "legacy_sqrt_sampler_pos_weight"}:
+        return None
     labels = y[indices].astype(int)
     counts = np.bincount(labels, minlength=2)
-    weights_by_class = 1.0 / np.sqrt(np.maximum(counts, 1))
+    if imbalance_strategy == "weighted_sampler":
+        weights_by_class = 1.0 / np.maximum(counts, 1)
+    else:
+        weights_by_class = 1.0 / np.sqrt(np.maximum(counts, 1))
     sample_weights = weights_by_class[labels]
     return WeightedRandomSampler(
         weights=torch.as_tensor(sample_weights, dtype=torch.double),
         num_samples=len(sample_weights),
         replacement=True,
     )
+
+
+def compute_pos_weight(
+    indices: np.ndarray, y: np.ndarray, imbalance_strategy: str
+) -> float:
+    labels = y[indices].astype(int)
+    counts = np.bincount(labels, minlength=2)
+    if imbalance_strategy == "pos_weight":
+        return float(max(counts[0], 1) / max(counts[1], 1))
+    if imbalance_strategy == "legacy_sqrt_sampler_pos_weight":
+        return float(np.sqrt(max(counts[0], 1) / max(counts[1], 1)))
+    return 1.0
 
 
 def safe_auc(y_true: np.ndarray, y_score: np.ndarray, kind: str) -> float:
@@ -1098,6 +1133,8 @@ def main() -> None:
         safe_name = f"{safe_name}_seqpurge_{args.sequence_purge_mode}"
     if args.label_mode != "all":
         safe_name = f"{safe_name}_{args.label_mode}"
+    if args.imbalance_strategy != "legacy_sqrt_sampler_pos_weight":
+        safe_name = f"{safe_name}_imbalance_{args.imbalance_strategy}"
     if args.random_state != 42:
         safe_name = f"{safe_name}_seed{args.random_state}"
     x_path = processed_dir / f"X_ref_alt_marker_{dataset_suffix}.npy"
@@ -1320,6 +1357,9 @@ def main() -> None:
     print("warmup_epochs:", args.warmup_epochs)
     print("min_lr_ratio:", args.min_lr_ratio)
     print("grad_clip_norm:", args.grad_clip_norm)
+    print("imbalance_strategy:", args.imbalance_strategy)
+
+    train_sampler = make_weighted_sampler(train_idx, y, args.imbalance_strategy)
 
     train_loader = make_loader(
         x,
@@ -1328,7 +1368,8 @@ def main() -> None:
         positional_encoding,
         args.batch_size,
         args.num_workers,
-        sampler=make_weighted_sampler(train_idx, y),
+        sampler=train_sampler,
+        shuffle=train_sampler is None,
         random_reverse_complement=args.rc_augment,
     )
     train_eval_loader = make_loader(
@@ -1385,13 +1426,14 @@ def main() -> None:
         else None
     )
 
-    labels_train = y[train_idx].astype(int)
-    counts = np.bincount(labels_train, minlength=2)
-    pos_weight_value = float(np.sqrt(counts[0] / max(counts[1], 1)))
+    pos_weight_value = compute_pos_weight(train_idx, y, args.imbalance_strategy)
     model = make_model(args.architecture, input_channels).to(device)
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor(pos_weight_value, dtype=torch.float32, device=device)
-    )
+    if pos_weight_value == 1.0:
+        criterion = nn.BCEWithLogitsLoss()
+    else:
+        criterion = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor(pos_weight_value, dtype=torch.float32, device=device)
+        )
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
@@ -1484,6 +1526,7 @@ def main() -> None:
         print("easy negative rows:", f"{len(easy_neg_idx):,}")
         print("fine-tune rows:", f"{len(hard_train_idx):,}")
 
+        hard_sampler = make_weighted_sampler(hard_train_idx, y, args.imbalance_strategy)
         hard_loader = make_loader(
             x,
             y,
@@ -1491,7 +1534,8 @@ def main() -> None:
             positional_encoding,
             args.batch_size,
             args.num_workers,
-            shuffle=True,
+            sampler=hard_sampler,
+            shuffle=hard_sampler is None,
             random_reverse_complement=args.rc_augment,
         )
         optimizer = torch.optim.AdamW(
@@ -1621,6 +1665,7 @@ def main() -> None:
         "batch_size": args.batch_size,
         "epochs": args.epochs,
         "hard_negative_epochs": 0 if args.no_hard_negative else args.hard_negative_epochs,
+        "imbalance_strategy": args.imbalance_strategy,
         "pos_weight": pos_weight_value,
         "train_rows": int(len(train_idx)),
         "val_rows": int(len(val_idx)),

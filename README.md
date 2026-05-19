@@ -124,8 +124,8 @@ Train CNN với `GroupShuffleSplit` theo `GeneSymbol`, không để cùng gene x
 
 Notebook này cũng có:
 
-- weighted sampler cho class imbalance
-- `pos_weight`
+- cấu hình xử lý class imbalance theo một cơ chế tại một thời điểm
+- mặc định mới tránh dùng đồng thời weighted sampler và `pos_weight`
 - hard-negative fine-tuning
 - threshold table để chọn precision/recall operating point
 
@@ -167,6 +167,7 @@ Script train cũng hỗ trợ:
 - `--purge-distance-bp`: khoảng cách purge, mặc định `5000`.
 - `--scheduler none|cosine|onecycle`, `--warmup-epochs`, `--min-lr-ratio`: learning-rate schedule theo batch.
 - `--grad-clip-norm`: gradient clipping, mặc định `1.0`.
+- `--imbalance-strategy none|weighted_sampler|pos_weight|legacy_sqrt_sampler_pos_weight`: chọn một cách xử lý class imbalance. Mặc định mới là `weighted_sampler`, tức dùng inverse-frequency sampler và loss không `pos_weight`; `legacy_sqrt_sampler_pos_weight` chỉ để tái lập artifact cũ.
 - `--random-state`: đổi gene-group split; output seed khác 42 được gắn hậu tố `_seedXX` để tránh ghi đè artifact chính.
 
 Kết quả trên benchmark 460k/gene-group cũ cho thấy chỉ tăng window lên 1001 bp bằng CNN baseline chưa cải thiện. Cải tiến mạnh nhất đến từ 601 bp + dilated CNN + RC augment/TTA; 1D window attention tăng thêm trên benchmark cũ nhưng chưa được xem là best cuối cùng trên split nghiêm ngặt `fixed_refseq`.
@@ -294,6 +295,41 @@ Kết quả Kaggle đã chạy:
 
 Kết luận: FiLM mạnh hơn về mặt kiến trúc nhưng chưa cải thiện rõ so với compact baseline. Nguyên nhân khả dĩ là FiLM điều kiện hóa theo channel toàn cục, còn SNV là tín hiệu cục bộ tại center; full 9-channel vẫn thắng vì đưa `REF/ALT/marker` vào đúng vị trí từ đầu.
 
+### `notebooks/13_kaggle_train_sparse_alt_8ch_cnn_601.ipynb`
+
+Ablation trực tiếp để kiểm tra giả thuyết: phần thắng của 9-channel đến từ ALT toàn chuỗi hay chỉ từ ALT tại center.
+
+Thiết kế:
+
+- Input 8 channel: `REF one-hot 4 channel (toàn bộ 601bp) + ALT one-hot 4 channel (chỉ nonzero tại center)`.
+- Bỏ marker channel vì ALT nonzero đã đánh dấu center.
+- Encode on-the-fly từ `X_ref_index` (`0.80 GB`) + ALT base từ metadata, không lưu dense tensor.
+- Model: dilated CNN chuẩn, **không cần** center vector fusion, SE/gating, hay FiLM.
+- Bản Kaggle standalone, cùng ràng buộc path và cờ tăng tốc như notebook 11/12.
+
+Lý do thử nghiệm:
+
+- Full 9-channel lặp ALT ở 600/601 vị trí (ALT = REF ngoài center) → ~99.8% redundant.
+- Compact 4-channel bỏ hẳn ALT khỏi CNN → kém `0.025` PR-AUC vì CNN không biết mutation ở đâu.
+- Sparse ALT giữ ALT **đúng vị trí center** → conv kernel layer 1 vẫn thấy mutation tại center (early fusion), nhưng không lặp ALT.
+- Qua các dilated conv layers, ALT signal tự lan truyền từ center ra xung quanh.
+
+Notebook cũng có cell calibration plot + Platt scaling ở cuối (section 22):
+
+- Fit Platt scaling (logistic regression 2 params) trên **validation set**, apply lên test.
+- Vẽ calibration curve trước/sau, gap per bin, probability distribution shift.
+- Bảng so sánh: ROC-AUC, PR-AUC (giữ nguyên), Brier score, ECE (giảm sau Platt).
+
+Kết quả: chưa chạy. Kỳ vọng PR-AUC xấp xỉ full 9-channel vì conv kernel tại center thấy input giống hệt; nếu đúng, có thể thay 9-channel bằng 8-channel sparse để giảm storage ~7x.
+
+Lưu ý khi chạy:
+
+- `SEQ_CHANNELS = 8` trong config. Nếu bật positional encoding thì total channels = 8 + dim.
+- Dataset trả về 2-tuple `(x, label)`, không phải 3-tuple như compact.
+- ALT sparse channels cực kỳ thưa → BatchNorm trên channel 4-7 sẽ có mean gần 0, variance nhỏ; nếu thấy training bất ổn ở epoch đầu, thử tăng BatchNorm momentum hoặc warm-up.
+- RC augment/TTA đã xử lý complement cho cả 4 REF channels lẫn 4 ALT channels.
+
+
 ### `scripts/build_refseq_context_parquet.py` và `scripts/build_ref_sequence_parquet.py`
 
 Các script thử nghiệm lưu context dạng `ref_seq` string Parquet thay vì dense one-hot `.npy`.
@@ -401,12 +437,14 @@ Bảng này dùng split nghiêm ngặt hơn random/gene split cũ: `genome_block
 | Compact SE/gating 601 bp | compact + channel gate từ center REF/ALT | Kaggle, cùng split logic | 0.9781 | 0.8858 | 0.7940 | 0.7780 | 0.8107 | chưa lưu local |
 | Compact FiLM blocks 601 bp | compact + FiLM residual blocks | Kaggle, cùng split logic | 0.9780 | 0.8874 | 0.7943 | 0.7762 | 0.8133 | chưa lưu local |
 | Full dilated CNN 601 bp | `REF+ALT+marker+PE`, 17-channel | chromosome split | 0.9755 | 0.8877 | 0.7899 | 0.8244 | 0.7582 | `[[217058, 5531], [8280, 25965]]` |
+| Sparse ALT 8-ch CNN 601 bp | `REF 4-ch + ALT 4-ch sparse at center`, 8-channel | Kaggle, cùng split logic | chưa chạy | chưa chạy | chưa chạy | chưa chạy | chưa chạy | chưa chạy |
 
 Nhận xét chính:
 
 - Full 9-channel vẫn tốt nhất vì là early fusion: convolution đầu đã thấy `REF`, `ALT` và marker đúng tại center.
 - Compact input sạch và nhẹ hơn nhiều (`X_ref_index_601_fixed_refseq.npy` khoảng `0.80 GB` so với dense 9-channel khoảng `7.19 GB`) nhưng giảm khoảng `0.025` PR-AUC.
 - SE/gating và FiLM đưa REF/ALT vào sớm hơn compact baseline, nhưng chưa kéo lại được khoảng cách. Gating hiện là điều kiện hóa channel toàn cục, trong khi tín hiệu SNV là cục bộ tại center.
+- Sparse ALT 8-ch là ablation kiểm tra liệu giữ ALT tại đúng vị trí center (early fusion) nhưng bỏ ALT redundant ở 600 vị trí còn lại có đủ hay không.
 - Chromosome split nghiêm hơn về chromosome holdout nhưng phân bố chromosome có thể khác và test set khác; dùng để kiểm tra độ bền, không so trực tiếp tuyệt đối với genome-block split.
 
 ### Benchmark lịch sử trước `fixed_refseq`
@@ -528,15 +566,17 @@ Residual/dilated residual không tự động tốt hơn. Window attention có l
 
 ## Ý tưởng tiếp theo
 
-### Ưu tiên 1: local explicit mutation embedding
+### Ưu tiên 1: local explicit mutation embedding → đã implement (notebook 13)
 
 Thiết kế nằm giữa full 9-channel và compact:
 
 ```text
-4 REF channels
-+ 1 marker center
-+ 4 ALT-at-center channels, chỉ nonzero tại center
+4 REF channels (toàn bộ 601bp)
++ 4 ALT-at-center channels, chỉ nonzero tại center (sparse)
+= 8 channels, bỏ marker vì ALT nonzero đã đánh dấu center
 ```
+
+Đã implement trong `notebooks/13_kaggle_train_sparse_alt_8ch_cnn_601.ipynb`. Chưa chạy, cần benchmark trên Kaggle hoặc local.
 
 Mục tiêu: giữ thông tin mutation tại đúng vị trí, nhưng không lặp ALT trên toàn 601 bp. Đây là ablation trực tiếp để kiểm tra liệu phần thắng của 9-channel đến từ ALT toàn chuỗi hay chỉ từ ALT tại center.
 
@@ -737,9 +777,11 @@ Thứ tự chạy lại gợi ý:
      - `notebooks/10_train_best_cnn_601_dilated_rcaug_rctta.ipynb`: full 9-channel model chính.
      - `notebooks/11_train_compact_ref_alt_center_cnn_601.ipynb`: compact REF + center REF/ALT.
      - `notebooks/12_kaggle_train_compact_ref_alt_center_film_cnn_601.ipynb`: FiLM/gating mạnh hơn trên Kaggle.
+     - `notebooks/13_kaggle_train_sparse_alt_8ch_cnn_601.ipynb`: sparse ALT 8-channel ablation + calibration plot.
    - Khi chạy Kaggle, dùng bản standalone:
      - `notebooks/11_kaggle_train_compact_ref_alt_center_cnn_601.ipynb`
      - `notebooks/12_kaggle_train_compact_ref_alt_center_film_cnn_601.ipynb`
+     - `notebooks/13_kaggle_train_sparse_alt_8ch_cnn_601.ipynb`
      - Input phải nằm trong `/kaggle/input`; output/cache/model nằm trong `/kaggle/working`.
 3. Tabular/annotation:
    - `notebooks/07_build_clinvar_tabular_dataset.ipynb`
@@ -753,8 +795,10 @@ Thứ tự chạy lại gợi ý:
 - Random row split cho kết quả dễ optimistic vì gene/genomic neighborhood overlap cao. `gene_group` tốt hơn random row split nhưng vẫn có genomic proximity leakage; benchmark chính hiện nên ưu tiên `genome_block + coordinate purge + sequence purge`.
 - Context dài tốn storage/compute hơn đáng kể nếu lưu dense one-hot `.npy`. Dataset `fixed_refseq` 601 bp dense 9-channel đã khoảng `7.19 GB`; 2001/4001 bp trên 1.4M dòng sẽ rất nặng. Nên ưu tiên lưu REF string/base-index và encode on-the-fly nếu muốn context dài.
 - Compact/FiLM chưa vượt full 9-channel. Điều này không có nghĩa ý tưởng sai, mà cho thấy mutation cần biểu diễn cục bộ tại center; global gating chưa thay thế được early fusion `REF+ALT+marker`.
+- Các artifact benchmark đã chạy trước đây dùng cấu hình imbalance cũ có cả sampler và `pos_weight` dạng sqrt. Code hiện đã tách thành `IMBALANCE_STRATEGY`/`--imbalance-strategy` để tránh double class-weight trong các run mới; nên rerun benchmark chính trước khi chốt số cuối cùng.
 - Window attention từng là best trên gene-group benchmark cũ, nhưng không nên xem là kết luận cuối trên split nghiêm ngặt mới nếu chưa chạy lại cùng `fixed_refseq/genome_block`.
 - Do đã thử nhiều architecture trên cùng project, có nguy cơ overfit ở cấp experiment/benchmark. Nên báo cáo mean/std multi-seed và nếu có thể làm temporal/external validation.
 - External annotation chưa thật sự đầy đủ: `variant_annotations.parquet` hiện có `consequence = unknown` và các cột gnomAD/CADD/SpliceAI đang null.
 - Bài toán đang là binary classification đã loại `Uncertain significance`, `Conflicting interpretations`, `not provided` và các nhãn mơ hồ khác.
+- Probability output của các model hiện tại chưa calibrate: model thường overconfident ở vùng probability trung bình (0.3-0.7). Notebook 13 có cell Platt scaling + calibration plot để kiểm tra và chỉnh; nên chạy cell này sau mỗi run để đánh giá mức độ miscalibration.
 - Đây là project ML nghiên cứu/thử nghiệm, chưa phải pipeline clinical-grade.
