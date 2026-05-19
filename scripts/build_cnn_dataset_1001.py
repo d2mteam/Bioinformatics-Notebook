@@ -29,6 +29,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project-dir", type=Path, default=root)
     parser.add_argument("--flank", type=int, default=500)
     parser.add_argument(
+        "--output-tag",
+        default="",
+        help=(
+            "Optional suffix added after context length, e.g. fixed_refseq writes "
+            "X_ref_alt_marker_601_fixed_refseq.npy."
+        ),
+    )
+    parser.add_argument(
         "--input",
         type=Path,
         default=root / "processed" / "clinvar_filtered_step8.parquet",
@@ -69,6 +77,8 @@ def main() -> None:
     flank = args.flank
     context_length = flank * 2 + 1
     suffix = str(context_length)
+    if args.output_tag:
+        suffix = f"{suffix}_{args.output_tag}"
 
     context_path = processed_dir / f"clinvar_context_{suffix}.parquet"
     metadata_path = processed_dir / f"clinvar_training_metadata_{suffix}.parquet"

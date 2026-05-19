@@ -1,0 +1,81 @@
+Project: /mnt/MyData/Bioinformatics/Project
+X: /mnt/MyData/Bioinformatics/Project/processed/X_ref_alt_marker_601_fixed_refseq.npy
+y: /mnt/MyData/Bioinformatics/Project/processed/y_601_fixed_refseq.npy
+metadata: /mnt/MyData/Bioinformatics/Project/processed/clinvar_training_metadata_601_fixed_refseq.parquet
+X shape: (1426427, 601, 9) uint8
+y shape: (1426427,) int8
+metadata shape: (1426427, 15)
+label counts: {np.int8(0): np.int64(1257967), np.int8(1): np.int64(168460)}
+train=873,408, val=296,185, test=256,834
+train labels: {np.int8(0): np.int64(775413), np.int8(1): np.int64(97995)}
+val labels: {np.int8(0): np.int64(259965), np.int8(1): np.int64(36220)}
+test labels: {np.int8(0): np.int64(222589), np.int8(1): np.int64(34245)}
+split_mode: chromosome
+purge_distance_bp: 5000
+gene overlap train/val: 3
+gene overlap train/test: 13
+chromosome overlap train/val: 0
+chromosome overlap train/test: 0
+train chromosomes: ['11', '12', '13', '14', '15', '16', '19', '20', '22', '3', '5', '6', '7', '8', '9', 'MT', 'UN', 'Y']
+val chromosomes: ['17', '18', '2', '4']
+test chromosomes: ['1', '10', '21', 'X']
+val nearest train distance: {'min': inf, 'p5': inf, 'median': inf, 'p95': inf}
+test nearest train/val distance: {'min': inf, 'p5': inf, 'median': inf, 'p95': inf}
+device: cuda
+input_channels: 17
+batch_size: 256
+architecture: dilated
+positional_encoding: sinusoidal
+positional_dim: 8
+rc_augment: True
+rc_tta: True
+scheduler: none
+warmup_epochs: 0.0
+min_lr_ratio: 0.05
+grad_clip_norm: 0.0
+Epoch 1/5
+{'phase': 'main', 'epoch': 1, 'scheduler': 'none', 'warmup_epochs': 0.0, 'grad_clip_norm': 0.0, 'train_loss': 0.6316272238807346, 'train_accuracy': 0.7925826188905987, 'train_roc_auc': 0.8839429532150488, 'train_pr_auc': 0.7538074844451124, 'train_lr': 0.001, 'train_grad_norm': nan, 'val_loss': 0.41137599426072163, 'val_accuracy': 0.8605027263365802, 'val_roc_auc': 0.9432747910687505, 'val_pr_auc': 0.7704832144949569}
+New best val_pr_auc: 0.7705
+Epoch 2/5
+{'phase': 'main', 'epoch': 2, 'scheduler': 'none', 'warmup_epochs': 0.0, 'grad_clip_norm': 0.0, 'train_loss': 0.42190453771567565, 'train_accuracy': 0.8759067927016927, 'train_roc_auc': 0.9500399043278689, 'train_pr_auc': 0.8820398647128014, 'train_lr': 0.001, 'train_grad_norm': nan, 'val_loss': 0.3054975309206246, 'val_accuracy': 0.8970508297179128, 'val_roc_auc': 0.9690845243757753, 'val_pr_auc': 0.8596146051991699}
+New best val_pr_auc: 0.8596
+Epoch 3/5
+{'phase': 'main', 'epoch': 3, 'scheduler': 'none', 'warmup_epochs': 0.0, 'grad_clip_norm': 0.0, 'train_loss': 0.3466904182949284, 'train_accuracy': 0.8989258170293838, 'train_roc_auc': 0.9660034870631266, 'train_pr_auc': 0.9154701867576357, 'train_lr': 0.001, 'train_grad_norm': nan, 'val_loss': 0.2580003036949715, 'val_accuracy': 0.9158195047014535, 'val_roc_auc': 0.9759903776602132, 'val_pr_auc': 0.8856491931194018}
+New best val_pr_auc: 0.8856
+Epoch 4/5
+{'phase': 'main', 'epoch': 4, 'scheduler': 'none', 'warmup_epochs': 0.0, 'grad_clip_norm': 0.0, 'train_loss': 0.305785635395208, 'train_accuracy': 0.9109499798490511, 'train_roc_auc': 0.973317504226945, 'train_pr_auc': 0.9314654061324028, 'train_lr': 0.001, 'train_grad_norm': nan, 'val_loss': 0.23715484168837128, 'val_accuracy': 0.9236018029272245, 'val_roc_auc': 0.9788997541433045, 'val_pr_auc': 0.8954217013431169}
+New best val_pr_auc: 0.8954
+Epoch 5/5
+{'phase': 'main', 'epoch': 5, 'scheduler': 'none', 'warmup_epochs': 0.0, 'grad_clip_norm': 0.0, 'train_loss': 0.27942332910375034, 'train_accuracy': 0.9192130138491976, 'train_roc_auc': 0.9775539003954965, 'train_pr_auc': 0.9414540686746332, 'train_lr': 0.001, 'train_grad_norm': nan, 'val_loss': 0.2123097974377311, 'val_accuracy': 0.9412225467191113, 'val_roc_auc': 0.9813592797390864, 'val_pr_auc': 0.9064685336982753}
+New best val_pr_auc: 0.9065
+Hard-negative mining on train set...
+positive train rows: 97,995
+hard negative rows: 42,589
+easy negative rows: 140,584
+fine-tune rows: 281,168
+Hard-negative epoch 1/2
+{'phase': 'hard_negative', 'epoch': 1, 'scheduler': 'none', 'warmup_epochs': 0, 'grad_clip_norm': 0.0, 'train_loss': 0.43871232389331927, 'train_accuracy': 0.8411661355488533, 'train_roc_auc': 0.9503565904262632, 'train_pr_auc': 0.912473188451789, 'train_lr': 0.0003, 'train_grad_norm': nan, 'val_loss': 0.21081172967179665, 'val_accuracy': 0.9351317588669243, 'val_roc_auc': 0.9835620607637546, 'val_pr_auc': 0.9186074462240303}
+New best val_pr_auc: 0.9186
+Hard-negative epoch 2/2
+{'phase': 'hard_negative', 'epoch': 2, 'scheduler': 'none', 'warmup_epochs': 0, 'grad_clip_norm': 0.0, 'train_loss': 0.4235628050907955, 'train_accuracy': 0.8500896261309964, 'train_roc_auc': 0.9540440125922887, 'train_pr_auc': 0.9186280294440167, 'train_lr': 0.0003, 'train_grad_norm': nan, 'val_loss': 0.20167021433296706, 'val_accuracy': 0.9380657359420632, 'val_roc_auc': 0.9840294568069484, 'val_pr_auc': 0.9199997776284612}
+New best val_pr_auc: 0.9200
+Test metrics: {'loss': 0.24799918232169116, 'accuracy': 0.9273655357156763, 'roc_auc': 0.9755286576902983, 'pr_auc': 0.887687740443942}
+              precision    recall  f1-score   support
+
+      benign       0.98      0.93      0.96    222589
+  pathogenic       0.67      0.90      0.77     34245
+
+    accuracy                           0.93    256834
+   macro avg       0.83      0.92      0.86    256834
+weighted avg       0.94      0.93      0.93    256834
+
+Confusion matrix:
+[[207397  15192]
+ [  3463  30782]]
+Saved model: /mnt/MyData/Bioinformatics/Project/models/clinvar_cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_pytorch.pt
+Saved predictions: /mnt/MyData/Bioinformatics/Project/processed/cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_test_predictions_pytorch.parquet
+Saved history: /mnt/MyData/Bioinformatics/Project/processed/cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_training_history_pytorch.parquet
+Saved thresholds: /mnt/MyData/Bioinformatics/Project/processed/cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_threshold_table_pytorch.parquet
+Saved val thresholds: /mnt/MyData/Bioinformatics/Project/processed/cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_val_threshold_table_pytorch.parquet
+Saved metrics: /mnt/MyData/Bioinformatics/Project/processed/cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_metrics.json
+Saved split indices: /mnt/MyData/Bioinformatics/Project/processed/cnn_gene_group_positional_encoding_601_fixed_refseq_dilated_rcaug_rctta_chromosome_split_split_indices.npz
