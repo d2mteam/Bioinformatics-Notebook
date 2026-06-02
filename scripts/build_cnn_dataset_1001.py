@@ -101,6 +101,7 @@ def main() -> None:
         "Type",
         "GeneSymbol",
         "ClinicalSignificance",
+        "LastEvaluated",
         "Assembly",
         "Chromosome",
         "ReviewStatus",

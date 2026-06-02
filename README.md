@@ -14,6 +14,30 @@ Nguồn dữ liệu chính là `Data/variant_summary.txt` từ ClinVar snapshot 
 
 Artifact hiện tại cho thấy pipeline đã chạy xong preprocessing, đã train nhiều model baseline, đã audit leakage của random/gene split, đã sửa mapping FASTA RefSeq accession `.11/.12`, và đã thử các hướng compact input, SE/gating, FiLM/gating, Kaggle standalone, explainability và error analysis. Model sequence tốt nhất theo split nghiêm ngặt hiện tại là full 9-channel 601 bp dilated CNN, còn notebook compact 4-channel là hướng gọn hơn để giảm input thừa và dễ giải thích.
 
+## Bảng metric các mốc CNN chính
+
+| Mốc | Cải tiến chính | Dataset / split | PR-AUC | ROC-AUC | F1 | Precision | Recall | Accuracy | Threshold |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|
+| CNN alt-only 201 bp | CNN 1D baseline | 460k / random row | 0.2454 | 0.6526 | 0.2774 | 0.1772 | 0.6389 | 0.5705 | 0.5 |
+| CNN REF+ALT+marker 201 bp | Early fusion 9ch | 460k / random row | 0.5224 | 0.8482 | 0.4746 | 0.3532 | 0.7233 | 0.7933 | 0.5 |
+| CNN + positional encoding | + sinusoidal PE | 460k / gene_group | 0.5722 | 0.8806 | 0.5529 | 0.5272 | 0.5811 | 0.8835 | 0.5 |
+| CNN 1001 bp + PE | Context dài hơn | 460k / gene_group | 0.5702 | 0.8584 | 0.5064 | 0.3775 | 0.7691 | 0.7834 | 0.5 |
+| Dilated CNN 601 bp | Tích chập thưa | 460k / gene_group | 0.7745 | 0.9327 | 0.6933 | 0.6693 | 0.7191 | 0.9081 | 0.5 |
+| Dilated CNN 1001 bp | Tích chập thưa + 1001 bp | 460k / gene_group | 0.7732 | 0.9317 | 0.6866 | 0.6491 | 0.7287 | 0.9039 | 0.5 |
+| Dilated CNN 601 bp + RC | + RC augment/TTA | 460k / gene_group | 0.8431 | 0.9557 | 0.7366 | 0.6693 | 0.8188 | 0.9154 | 0.5 |
+| Dilated residual CNN 601 bp + RC | + residual/skip | 460k / gene_group | 0.8224 | 0.9493 | 0.7335 | 0.7197 | 0.7479 | 0.9215 | 0.5 |
+| Dilated CNN 601 bp + relative PE + RC | + relative PE | 460k / gene_group | 0.8381 | 0.9533 | 0.7362 | 0.6733 | 0.8121 | 0.9159 | 0.5 |
+| Dilated window attention 601 bp + RC | + 1D window attention | 460k / gene_group | 0.8507 | 0.9589 | 0.7410 | 0.6605 | 0.8440 | 0.9148 | 0.5 |
+| Full 9ch dilated CNN 601 bp | fixed_refseq + strict split | 1.426M / genome_block + purge | **0.9124** | **0.9839** | **0.8178** | **0.7920** | **0.8454** | **0.9582** | val-F1 |
+| Compact REF + center REF/ALT | 4ch late fusion | 1.426M / genome_block + purge | 0.8870 | 0.9782 | 0.7946 | 0.7767 | 0.8133 | 0.9533 | val-F1 |
+| Compact SE/gating | + SE/gate | 1.426M / genome_block + purge | 0.8858 | 0.9781 | 0.7940 | 0.7780 | 0.8107 | n/a | val-F1 |
+| Compact FiLM blocks | + FiLM all blocks | 1.426M / genome_block + purge | 0.8874 | 0.9780 | 0.7943 | 0.7762 | 0.8133 | n/a | val-F1 |
+| Sparse ALT 8ch multibranch | ALT-at-center + multibranch CNN | 1.426M / genome_block + purge | 0.9043 | 0.9817 | 0.8099 | 0.7829 | 0.8388 | 0.9563 | val-F1 |
+| Full 9ch dilated CNN 601 bp | chromosome holdout | 1.426M / chromosome split | 0.8877 | 0.9755 | 0.7899 | 0.8244 | 0.7582 | 0.9462 | val-F1 |
+| Full 9ch temporal space-only matched | pseudo-temporal diagnostic | 1.300M / space_only_matched | 0.8423 | 0.9682 | 0.7535 | 0.7594 | 0.7477 | 0.9459 | val-F1 |
+| Full 9ch temporal time-only | pseudo-temporal diagnostic | 1.300M / time_only | 0.5182 | 0.9023 | 0.5259 | 0.5187 | 0.5333 | 0.9639 | val-F1 |
+| Full 9ch two-snapshot temporal | true prospective split | 2022-12 -> 2026-05 | đang chạy | đang chạy | đang chạy | đang chạy | đang chạy | đang chạy | val-F1 |
+
 ## Dữ liệu và label hiện tại
 
 Pipeline mới sau khi sửa mapping FASTA theo RefSeq accession version (`NC_000001.11`, `NC_000002.12`, ...) tạo ra dataset `fixed_refseq` lớn hơn đáng kể:
@@ -212,46 +236,72 @@ Notebook standalone để đẩy lên Kaggle. Notebook tự tìm `variant_summar
 
 ### `notebooks/10_train_best_cnn_601_dilated_rcaug_rctta.ipynb`
 
-Notebook project cho benchmark nghiêm ngặt mới trên dataset `fixed_refseq`.
+Notebook project cho benchmark nghiêm ngặt mới trên dataset `fixed_refseq`. Đây là model reference chính để so sánh với các biến thể compact/sparse.
 
-Cấu hình chính:
+**Cấu hình chính:**
 
 - Input full 9-channel: `REF one-hot 4 + ALT one-hot 4 + marker center 1`.
-- Positional encoding 8 kênh, tổng cộng 17 kênh vào CNN.
-- Dilated CNN `[1, 2, 4, 8, 16, 32, 64]`.
-- RC augment khi train và RC TTA khi eval/test.
-- Split chính: `genome_block`, block `1,000,000 bp`, coordinate purge `5000 bp`, exact REF sequence purge.
-- Có cell error analysis, high-confidence wrong cases và review status cross-check.
+- Positional encoding sinusoidal 8 kênh, tổng 17 kênh vào CNN.
+- `DilatedClinVarCNN`: stem conv7 → 7 dilated conv7 với dilation `[1, 2, 4, 8, 16, 32, 64]` → pooling `center ‖ global_max ‖ global_mean` (64×3) → MLP → logit.
+- RC augment khi train (50% xác suất flip) và RC TTA khi eval/test (average forward + rc).
+- Split: `genome_block` block 1 Mb, coordinate purge ≥ 5000 bp, exact REF sequence purge (Blake2b hash).
+- `imbalance_strategy = weighted_sampler` (inverse-frequency sampler, không dùng `pos_weight`).
+- Hard-negative mining 2 epoch sau main training với lr `3e-4`: giữ toàn bộ positives + hard negatives (score ≥ 0.5) + capped easy negatives.
+- Mặc định `RUN_TRAIN = True`, `FORCE_OVERWRITE = True`. Đổi `RUN_TRAIN = False` để chỉ đọc metrics/inference.
 
-Kết quả nghiêm ngặt seed 42:
+**Training history artifact (seed 42, genome_block split):**
+
+| Phase | Epoch | Val PR-AUC | Val ROC-AUC |
+|---|---:|---:|---:|
+| main | 1 | 0.7819 | 0.9475 |
+| main | 5 | 0.8943 | 0.9790 |
+| hard_negative | 1 | 0.9023 | 0.9801 |
+| hard_negative | 2 | **0.9053** | **0.9809** |
+
+**Kết quả test nghiêm ngặt seed 42:**
 
 - Test PR-AUC `0.9124`.
 - Test ROC-AUC `0.9839`.
 - Test F1 tại threshold chọn từ validation `0.8178`.
 - Confusion matrix tại threshold validation-F1: `[[186995, 5335], [3713, 20308]]`.
 
+**Cells đáng chú ý:**
+
+- Cell 4 (`Split strict`): build genome-block groups, purge coordinate + sequence, audit overlap.
+- Cell 8 (`Train/evaluate inline`): toàn bộ train loop, hard-negative mining, lưu metrics/predictions/split_indices.
+- Cell 10 (`Metrics`): đọc metrics JSON, in summary; dùng `HISTORICAL_METRICS` fallback nếu chưa chạy.
+- Cell 11 (`Load checkpoint`): load artifact để inference mà không cần chạy lại train.
+- Cell 12 (`Error analysis`): sort predictions theo `abs_error`, xem gene/ClinicalSignificance/REF/ALT của các case sai nhất.
+
 Đây là mốc metric sequence tốt nhất hiện tại theo split nghiêm ngặt.
 
 ### `notebooks/11_train_compact_ref_alt_center_cnn_601.ipynb`
 
-Notebook compact input để kiểm tra giả thuyết input 9-channel đang dư thừa.
+Notebook compact input để kiểm tra giả thuyết input 9-channel đang dư thừa. Pipeline tự xử lý dữ liệu từ raw ClinVar + FASTA (không dùng dense tensor `X_ref_alt_marker`).
 
-Thiết kế:
+**Thiết kế:**
 
-- CNN chỉ đọc `REF sequence` dạng 4-channel hoặc base-index on-the-fly.
-- Bỏ marker channel vì SNV luôn ở center.
-- Bỏ positional encoding mặc định vì vị trí đột biến cố định ở center.
-- REF/ALT tại center được đưa vào classifier bằng vector 8 chiều: `REF one-hot 4 + ALT one-hot 4`.
-- Có tùy chọn `LABEL_MODE = "all"` hoặc `"definitive_only"` để giữ/bỏ nhãn `Likely`.
-- Có heatmap/saliency để kiểm tra model tập trung quanh center hay vùng xa.
-- Có error analysis cho các case model tự tin sai, theo gene, REF/ALT, ClinVar label và `ReviewStatus`.
+- Lưu compact cache `X_ref_index_601_fixed_refseq.npy` shape `(N, 601)` dtype `uint8` (base index 0-3), khoảng `0.80 GB` so với `7.19 GB` dense.
+- `Dataset` encode one-hot on-the-fly từ `ref_index` + `alt_base` từ metadata.
+- CNN nhận `REF 4-channel sequence` (601 bp). Center REF/ALT vector 8 chiều đưa vào classifier (late fusion).
+- Bỏ marker channel và positional encoding mặc định (`POSITIONAL_ENCODING = "none"`).
+- `MODEL_VARIANT`:
+  - `"compact"`: CNN backbone + concatenate center_vector vào feature trước classifier.
+  - `"variant_gated_se"`: thêm `VariantConditionedSEGate` — MLP(center_vector) → tanh gate per-channel; weight zero-init để training bắt đầu giống compact baseline; `VARIANT_GATE_PLACEMENT = "stem_late"`.
+- `LABEL_MODE = "all"` (giữ Likely) hoặc `"definitive_only"` (chỉ Benign/Pathogenic thuần).
+- Cùng split logic với nb10: genome_block + purge 5000 bp + exact_ref sequence purge.
+- Cell 17 so sánh 3 model: full 9-channel (nb10), compact no-gate, compact SE-gate.
+- Cell 19 attribution heatmap (gradient saliency theo vị trí, phân rã center vs edges).
+- Cell 20/21 error analysis top wrong cases, phân tích theo gene và ReviewStatus.
 
-Kết quả strict split:
+**Kết quả strict split (seed 42):**
 
 - Test PR-AUC `0.8870`.
 - Test ROC-AUC `0.9782`.
 - Test F1 tại threshold chọn từ validation `0.7946`.
 - Confusion matrix: `[[186714, 5616], [4485, 19536]]`.
+
+So với nb10: giảm `0.025` PR-AUC, tăng false negative `3713 → 4485`. Nguyên nhân: compact là late fusion — CNN không thấy ALT/marker trong convolution đầu.
 
 So với full 9-channel, compact giảm khoảng `0.025` PR-AUC và tăng false negative. Điều này cho thấy 9-channel early fusion vẫn giúp CNN nhìn trực tiếp `REF/ALT/marker` tại center từ các convolution đầu.
 
@@ -276,58 +326,64 @@ Các cờ tăng tốc Kaggle:
 
 ### `notebooks/12_kaggle_train_compact_ref_alt_center_film_cnn_601.ipynb`
 
-Bản thử nghiệm FiLM/gating mạnh hơn trên Kaggle.
+Bản Kaggle standalone thử nghiệm FiLM/gating mạnh hơn SE-gate của nb11. Cùng split logic và dataset, khác ở cơ chế đưa thông tin biến thể vào CNN.
 
-Thiết kế:
+**Thiết kế:**
 
-- Vẫn dùng compact input: `REF sequence 601 bp + center REF/ALT vector`.
-- Thay SE/gating nhẹ bằng FiLM theo block:
-  ```text
-  gamma, beta = MLP(center_REF_ALT)
-  feature = feature * (1 + scale * gamma) + scale * beta
-  ```
-- Áp dụng vào residual dilated CNN blocks để đưa thông tin biến thể vào nhiều tầng hơn.
+- Vẫn dùng compact input: REF sequence 601 bp (4ch) + center REF/ALT vector (8dim).
+- `MODEL_VARIANT`:
+  - `"compact"`: baseline không gate.
+  - `"variant_gated_se"`: SE-gate nhẹ (giống nb11, giữ để so sánh).
+  - `"film_blocks"`: `VariantFiLMModulator` — MLP 3-layer sinh `gamma` và `beta` riêng biệt (channels×2 output), áp dụng feature-wise linear modulation tại **mỗi** dilated block: `y = x*(1 + scale*gamma) + scale*beta`, `scale=0.5`. Last layer zero-init.
+- `VARIANT_GATE_PLACEMENT = "all"` cho `film_blocks` (tất cả 7 dilated blocks nhận modulation).
+- Kaggle path logic: `IS_KAGGLE` flag auto-detect, input từ `/kaggle/input`, output vào `/kaggle/working`.
+- Cờ tăng tốc Kaggle: `BATCH_SIZE=512`, `NUM_WORKERS=4`, `USE_AMP=True`, `PREFETCH_FACTOR=4`, `PERSISTENT_WORKERS=True`, `TRAIN_METRICS_MODE="loss_only"`, `EVAL_RC_TTA_EVERY_EPOCH=False`.
 
-Kết quả Kaggle đã chạy:
+**Kết quả Kaggle (seed 42):**
 
-- `film_blocks`: test PR-AUC `0.8874`, ROC-AUC `0.9780`, F1 tại threshold validation-F1 `0.7943`.
-- SE/gating nhẹ: test PR-AUC `0.8858`, ROC-AUC `0.9781`, F1 `0.7940`.
+| MODEL_VARIANT | Test PR-AUC | Test ROC-AUC | F1 @ val threshold |
+|---|---:|---:|---:|
+| `film_blocks` | 0.8874 | 0.9780 | 0.7943 |
+| `variant_gated_se` (nb11) | 0.8858 | 0.9781 | 0.7940 |
 
-Kết luận: FiLM mạnh hơn về mặt kiến trúc nhưng chưa cải thiện rõ so với compact baseline. Nguyên nhân khả dĩ là FiLM điều kiện hóa theo channel toàn cục, còn SNV là tín hiệu cục bộ tại center; full 9-channel vẫn thắng vì đưa `REF/ALT/marker` vào đúng vị trí từ đầu.
+Kết luận: FiLM mạnh hơn về kiến trúc nhưng chưa cải thiện rõ. Channel-wise modulation toàn cục vẫn không thay thế được early fusion — SNV là tín hiệu điểm tại center, cần biểu diễn theo vị trí trong tensor.
 
 ### `notebooks/13_kaggle_train_sparse_alt_8ch_cnn_601.ipynb`
 
-Ablation trực tiếp để kiểm tra giả thuyết: phần thắng của 9-channel đến từ ALT toàn chuỗi hay chỉ từ ALT tại center.
+Ablation trực tiếp để kiểm tra giả thuyết: phần thắng của 9-channel đến từ ALT toàn chuỗi hay chỉ từ ALT tại center. Bản Kaggle standalone, cùng ràng buộc path và cờ tăng tốc như notebook 11/12.
 
-Thiết kế:
+**Lý do thử nghiệm — phân tích fusion:**
 
-- Input 8 channel: `REF one-hot 4 channel (toàn bộ 601bp) + ALT one-hot 4 channel (chỉ nonzero tại center)`.
-- Bỏ marker channel vì ALT nonzero đã đánh dấu center.
-- Encode on-the-fly từ `X_ref_index` (`0.80 GB`) + ALT base từ metadata, không lưu dense tensor.
-- Model: dilated CNN chuẩn, **không cần** center vector fusion, SE/gating, hay FiLM.
-- Bản Kaggle standalone, cùng ràng buộc path và cờ tăng tốc như notebook 11/12.
+| Thiết kế | ALT trong CNN | Cơ chế | Nhược điểm |
+|---|---|---|---|
+| Full 9-channel (nb10) | Toàn bộ 601 bp | Early fusion | ~99.8% ALT positions là redundant copy của REF |
+| Compact 4-channel (nb11) | Không có | Late fusion (vector) | CNN không thấy mutation trong convolution |
+| Sparse ALT 8-channel (nb13) | Chỉ tại center | Early fusion | BatchNorm channel 4-7 rất thưa ở epoch đầu |
 
-Lý do thử nghiệm:
+**Thiết kế:**
 
-- Full 9-channel lặp ALT ở 600/601 vị trí (ALT = REF ngoài center) → ~99.8% redundant.
-- Compact 4-channel bỏ hẳn ALT khỏi CNN → kém `0.025` PR-AUC vì CNN không biết mutation ở đâu.
-- Sparse ALT giữ ALT **đúng vị trí center** → conv kernel layer 1 vẫn thấy mutation tại center (early fusion), nhưng không lặp ALT.
-- Qua các dilated conv layers, ALT signal tự lan truyền từ center ra xung quanh.
+- Input 8 channel: `REF one-hot 4ch (toàn bộ 601 bp) + ALT one-hot 4ch (zeros trừ tại center)`.
+- Bỏ marker channel: ALT nonzero đã đánh dấu center.
+- Encode on-the-fly từ `X_ref_index` (0.80 GB) + `alt_base` từ metadata. Không lưu dense tensor riêng.
+- `MODEL_VARIANT`:
+  - `"sparse_alt"`: `DilatedClinVarCNN` chuẩn giống nb10, không có center_vector fusion, không SE/gating/FiLM.
+  - `"sparse_alt_multibranch"`: `MultiBranchDilatedClinVarCNN` — nhánh high-resolution bảo vệ tín hiệu center, nhánh downsample học context xa/global, concat hai nhánh trước classifier.
+- RC augment/TTA complement cả 4 REF channels lẫn 4 ALT channels đúng cách.
+- `BATCH_SIZE = 1024` trên Kaggle (nhỏ hơn vì 8ch nhẹ hơn 17ch).
 
-Notebook cũng có cell calibration plot + Platt scaling ở cuối (section 22):
+**Section 22 — Calibration plot + Platt scaling:**
 
-- Fit Platt scaling (logistic regression 2 params) trên **validation set**, apply lên test.
-- Vẽ calibration curve trước/sau, gap per bin, probability distribution shift.
-- Bảng so sánh: ROC-AUC, PR-AUC (giữ nguyên), Brier score, ECE (giảm sau Platt).
+- Load predictions + split_indices, predict lại trên validation set.
+- Fit Platt scaling (logistic regression 2 params A, B) trên validation, apply lên test.
+- Vẽ calibration curve 10 bins trước/sau, gap per bin, probability distribution shift.
+- Bảng so sánh: ROC-AUC, PR-AUC (không đổi sau Platt), Brier score, ECE (kỳ vọng giảm).
 
-Kết quả: chưa chạy. Kỳ vọng PR-AUC xấp xỉ full 9-channel vì conv kernel tại center thấy input giống hệt; nếu đúng, có thể thay 9-channel bằng 8-channel sparse để giảm storage ~7x.
+**Kết quả:** chưa chạy. Kỳ vọng PR-AUC xấp xỉ full 9-channel vì conv kernel tại center thấy input giống hệt; nếu đúng, 8-channel sparse thay thế được 9-channel dense để giảm storage ~7×.
 
-Lưu ý khi chạy:
+**Lưu ý khi chạy:**
 
-- `SEQ_CHANNELS = 8` trong config. Nếu bật positional encoding thì total channels = 8 + dim.
-- Dataset trả về 2-tuple `(x, label)`, không phải 3-tuple như compact.
-- ALT sparse channels cực kỳ thưa → BatchNorm trên channel 4-7 sẽ có mean gần 0, variance nhỏ; nếu thấy training bất ổn ở epoch đầu, thử tăng BatchNorm momentum hoặc warm-up.
-- RC augment/TTA đã xử lý complement cho cả 4 REF channels lẫn 4 ALT channels.
+- `SEQ_CHANNELS = 8`; dataset trả về 2-tuple `(x, label)` không phải 3-tuple như compact.
+- ALT sparse channels rất thưa: BatchNorm channel 4-7 có mean gần 0, variance nhỏ ở epoch đầu. Nếu training bất ổn, thử tăng BatchNorm momentum hoặc thêm warmup.
 
 
 ### `scripts/build_refseq_context_parquet.py` và `scripts/build_ref_sequence_parquet.py`
@@ -421,6 +477,96 @@ Output hiện tại:
 - `Data/annotations/variant_annotations.csv`
 
 Lưu ý trạng thái hiện tại: `gnomAD_AF`, `CADD_PHRED`, `SpliceAI_max` đều đang null trong artifact đã lưu. Cần đặt file gnomAD/CADD đã lọc vào `Data/annotations/` rồi chạy lại notebook nếu muốn dùng annotation thật.
+
+## Đánh giá notebook 10–13
+
+### Tổng quan chuỗi thử nghiệm
+
+Bốn notebook này tạo thành một chuỗi ablation có hệ thống, mỗi notebook trả lời đúng một câu hỏi về input representation:
+
+```text
+nb10 (9-ch full)  →  nb11 (4-ch compact late-fusion)  →  nb12 (4-ch + FiLM)  →  nb13 (8-ch sparse early-fusion)
+     baseline              ablation: bỏ ALT khỏi CNN          ablation: global gate          ablation: ALT tại đúng vị trí
+```
+
+### Đánh giá từng notebook
+
+#### Notebook 10 — Full 9-channel dilated CNN
+
+**Điểm mạnh:**
+
+- Pipeline hoàn chỉnh nhất: split logic nghiêm ngặt (genome_block + coordinate purge + sequence hash purge), hard-negative mining, RC aug/TTA, artifact versioning rõ ràng.
+- Metric tốt nhất trong chuỗi: PR-AUC `0.9124`, F1 `0.8178`.
+- Code modular, có thể dùng lại model/dataset/helper cho inference mà không cần retrain.
+- Cell error analysis có thể nhận diện systematic failure (label noise single-submitter vs lỗi model thực).
+
+**Điểm cần chú ý:**
+
+- Dense tensor `X_ref_alt_marker_601_fixed_refseq.npy` (`7.19 GB`) không thể đẩy lên Kaggle free tier — phải dùng bản standalone nb09 hoặc encode on-the-fly.
+- `CONFIG["scheduler"] = "none"` và `CONFIG["grad_clip_norm"] = 0.0` giữ đúng cấu hình của run tốt nhất cũ; chưa thử scheduler hay clipping trên split nghiêm ngặt mới.
+- Chưa có calibration plot: probability output chưa được kiểm tra mức độ miscalibration.
+- Kết quả test tốt nhưng chưa có multi-seed (chỉ seed 42); không rõ variance theo split.
+
+#### Notebook 11 — Compact REF + center vector (local project)
+
+**Điểm mạnh:**
+
+- Pipeline self-contained từ raw: không phụ thuộc dense tensor cũ, tự filter + build compact cache.
+- Tách biệt rõ `LABEL_MODE`, `MODEL_VARIANT`, `SPLIT_MODE` → dễ ablation.
+- Có attribution heatmap để kiểm tra model học từ center hay học vùng xa (quan trọng cho giải thích sinh học).
+- Cell so sánh 3 model (full / compact no-gate / compact SE-gate) trực tiếp trong notebook.
+
+**Điểm cần chú ý:**
+
+- SE-gate (`variant_gated_se`) chỉ cải thiện `0.8858 → 0.8870` PR-AUC so với compact no-gate — gating toàn cục chưa hiệu quả.
+- Compact là **late fusion**: CNN không thấy ALT trong convolution → giải thích khoảng cách `0.025` PR-AUC với nb10.
+- Có 2 notebook riêng (local `11_train_compact` và Kaggle `11_kaggle_train_compact`); logic trùng lặp nhiều — nếu sửa một cần nhớ sync sang bản kia.
+
+#### Notebook 12 — FiLM/gating mạnh (Kaggle)
+
+**Điểm mạnh:**
+
+- Thử nghiệm FiLM đúng cách: last-layer zero-init để training bắt đầu giống compact baseline, không bị destabilized.
+- Áp dụng FiLM tại **tất cả** 7 dilated blocks (`gate_placement="all"`) — đưa biến thể vào sớm và nhiều tầng.
+- Giữ lại SE-gate cũ để so sánh ablation.
+
+**Điểm cần chú ý:**
+
+- Kết quả (`0.8874`) gần như bằng compact baseline (`0.8870`) và SE-gate (`0.8858`) — cải tiến không có ý nghĩa thống kê.
+- Kết luận mạnh: **global channel modulation không thay thế được positional ALT information**. FiLM biết *loại* biến thể nhưng không biết *vị trí* → mâu thuẫn nội tại.
+- Cần benchmark thêm với `FILM_HIDDEN_DIM` lớn hơn hoặc spatial FiLM (modulate theo vị trí, không chỉ theo channel).
+
+#### Notebook 13 — Sparse ALT 8-channel (Kaggle, chưa chạy)
+
+**Điểm mạnh:**
+
+- Hypothesis đúng và thuyết phục: giữ ALT tại đúng vị trí center = early fusion mà không cần redundant copy ALT ở 600 vị trí còn lại.
+- Nếu kỳ vọng đúng (PR-AUC ≈ nb10), giảm storage dense tensor từ `7.19 GB` xuống `0.80 GB` (−89%).
+- `MultiBranchDilatedClinVarCNN` là thử nghiệm thú vị: nhánh high-res bảo vệ tín hiệu center, nhánh downsample học context xa.
+- Section 22 calibration + Platt scaling là bổ sung quan trọng còn thiếu ở các notebook trước.
+
+**Điểm cần chú ý:**
+
+- **Chưa có kết quả** — đây là notebook duy nhất trong chuỗi chưa được chạy.
+- BatchNorm trên channel 4-7 (ALT sparse) sẽ không ổn định ở epoch đầu: mean ≈ 0, variance rất nhỏ do hầu hết vị trí là 0. Nên theo dõi loss epoch 1 kỹ.
+- Nếu PR-AUC thấp hơn nb10 rõ rệt, điều đó sẽ chứng minh phần thắng của 9-channel đến từ ALT redundant ở nhiều vị trí (context spreading) chứ không chỉ từ early fusion tại center.
+
+### So sánh metric tổng hợp
+
+| Notebook | Input | Fusion | Test PR-AUC | Test ROC-AUC | F1 @ val thr | Storage tensor |
+|---|---|---|---:|---:|---:|---|
+| nb10 | REF+ALT+marker 9ch + PE 8ch = 17ch | Early (toàn chuỗi) | **0.9124** | **0.9839** | **0.8178** | 7.19 GB |
+| nb11 compact | REF 4ch + center vector 8dim | Late (vector) | 0.8870 | 0.9782 | 0.7946 | 0.80 GB |
+| nb11 SE-gate | REF 4ch + SE gate | Late + global gate | 0.8858 | 0.9781 | 0.7940 | 0.80 GB |
+| nb12 FiLM | REF 4ch + FiLM (tất cả blocks) | Late + global modulation | 0.8874 | 0.9780 | 0.7943 | 0.80 GB |
+| nb13 sparse | REF 4ch + ALT sparse 4ch = 8ch | Early (chỉ center) | chưa chạy | chưa chạy | chưa chạy | 0.80 GB |
+
+### Kết luận và hướng tiếp theo
+
+1. **Gap early vs late fusion là `~0.025` PR-AUC** — có ý nghĩa thực tiễn (tăng ~800 true positives trong test set 216k dòng).
+2. **Global modulation (SE/FiLM) không lấp được gap** — cần positional mutation signal trực tiếp trong tensor.
+3. **Notebook 13 là thử nghiệm quyết định**: nếu sparse ALT 8-channel đạt PR-AUC ≥ 0.910, có thể bỏ dense 9-channel và tiết kiệm 89% storage.
+4. **Bước sau khi có kết quả nb13**: chạy Platt calibration cho nb10 và nb11 để so sánh ECE; thử Siamese REF/ALT hoặc thêm biological annotation (VEP consequence, CADD, SpliceAI) để vượt trần sequence-only.
 
 ## Kết quả model hiện tại
 
