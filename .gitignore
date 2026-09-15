@@ -62,3 +62,6 @@ env/
 Thumbs.db
 *.swp
 *.swo
+
+# Archived experiments, drafts and unused files (kept locally, not published)
+archive/
